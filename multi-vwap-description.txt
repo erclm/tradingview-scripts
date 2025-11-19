@@ -1,0 +1,21 @@
+[b]Multi Rolling VWAP Indicator[/b]
+
+Displays 4 volume-weighted average price (VWAP) levels on your chart:
+
+[list]
+[*]7D VWAP - Weekly rolling average
+[*]30D VWAP - Monthly rolling average  
+[*]90D VWAP - Quarterly rolling average
+[*]365D VWAP - Yearly rolling average
+[/list]
+
+Each VWAP shows where the average price is, weighted by volume. Institutional traders often use these levels as support/resistance.
+
+[b]Optional Features:[/b]
+[list]
+[*]Bands show volatility zones (Value Area High/Low)
+[*]Anchor modes: Reset weekly, monthly, quarterly, or yearly instead of rolling
+[*]Crypto volume aggregation from 15+ exchanges for accurate calculations
+[/list]
+
+Clean, minimal design for white background charts.
