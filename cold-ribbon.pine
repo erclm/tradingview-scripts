@@ -1,0 +1,134 @@
+// This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © thelimabeanman
+// Inspiration: Hull Suite by InSilico and Trader XO Macro Trend Scanner by btc_charlie.
+
+//@version=6
+indicator("Cold Ribbon", shorttitle="ColdRibbon", overlay=true)
+
+// Inputs
+string GRP_CORE = "Core"
+float srcInput = input.source(close, "Source", group=GRP_CORE)
+int fastEmaLenInput = input.int(12, "Fast EMA", minval=1, group=GRP_CORE)
+int slowEmaLenInput = input.int(25, "Slow EMA", minval=1, group=GRP_CORE)
+int hullLenInput = input.int(8, "Hull Smoothing Length", minval=1, group=GRP_CORE)
+float responseBlendInput = input.float(0.70, "Responsiveness Blend (0=Hull, 1=EMA)", minval=0.0, maxval=1.0, step=0.05, group=GRP_CORE)
+bool autoTfProfileInput = input.bool(true, "Auto TF Profile", group=GRP_CORE)
+int hullLenIntraInput = input.int(3, "Intraday Hull Len (<=4H)", minval=1, group=GRP_CORE)
+float blendIntraInput = input.float(0.90, "Intraday Blend", minval=0.0, maxval=1.0, step=0.05, group=GRP_CORE)
+int hullLenDailyInput = input.int(5, "Daily Hull Len (<=1D)", minval=1, group=GRP_CORE)
+float blendDailyInput = input.float(0.75, "Daily Blend", minval=0.0, maxval=1.0, step=0.05, group=GRP_CORE)
+int hullLenSwingInput = input.int(8, "Swing Hull Len (>1D)", minval=1, group=GRP_CORE)
+float blendSwingInput = input.float(0.60, "Swing Blend", minval=0.0, maxval=1.0, step=0.05, group=GRP_CORE)
+
+string GRP_LOGIC = "Logic"
+float compressionAtrInput = input.float(0.18, "Compression Threshold (Spread/ATR)", minval=0.01, step=0.01, group=GRP_LOGIC)
+bool showSignalsInput = input.bool(false, "Show Signals", group=GRP_LOGIC)
+bool colorBarsInput = input.bool(false, "Color Bars", group=GRP_LOGIC)
+
+string GRP_STYLE = "Style"
+string palettePresetInput = input.string(
+     "Soft Sage / Dusty Rose",
+     "Palette Preset",
+     options=[
+         "Soft Sage / Dusty Rose",
+         "Classic Red / Green",
+         "Muted Teal / Terracotta",
+         "Olive Mist / Clay",
+         "Slate Blue / Warm Sand",
+         "Low-Contrast Mono"
+     ],
+     group=GRP_STYLE
+ )
+bool useCustomColorsInput = input.bool(false, "Use Custom Colors", group=GRP_STYLE)
+color bullCustomInput = input.color(#6F8F82, "Custom Bull", group=GRP_STYLE, inline="c")
+color bearCustomInput = input.color(#D18A8A, "Custom Bear", group=GRP_STYLE, inline="c")
+int fillTranspInput = input.int(42, "Fill Transparency", minval=0, maxval=100, group=GRP_STYLE)
+int edgeTranspInput = input.int(20, "Edge Transparency", minval=0, maxval=100, group=GRP_STYLE)
+int edgeWidthInput = input.int(1, "Edge Width", minval=1, maxval=4, group=GRP_STYLE)
+
+hma(series float src, simple int len) =>
+    simple int halfLen = math.max(1, int(math.round(len * 0.5)))
+    simple int sqrtLen = math.max(1, int(math.round(math.sqrt(len))))
+    ta.wma(2.0 * ta.wma(src, halfLen) - ta.wma(src, len), sqrtLen)
+
+// EMA regime foundation
+float fastEma = ta.ema(srcInput, fastEmaLenInput)
+float slowEma = ta.ema(srcInput, slowEmaLenInput)
+
+// Hull-style ribbon, but built from the EMA pair so the ribbon reflects EMA 12/25 structure.
+int tfSec = timeframe.in_seconds()
+bool isIntradayTf = tfSec > 0 and tfSec <= 4 * 60 * 60
+bool isDailyTf = tfSec > 4 * 60 * 60 and tfSec <= 24 * 60 * 60
+
+float fastHullManual = hma(fastEma, hullLenInput)
+float slowHullManual = hma(slowEma, hullLenInput)
+float fastHullIntra = hma(fastEma, hullLenIntraInput)
+float slowHullIntra = hma(slowEma, hullLenIntraInput)
+float fastHullDaily = hma(fastEma, hullLenDailyInput)
+float slowHullDaily = hma(slowEma, hullLenDailyInput)
+float fastHullSwing = hma(fastEma, hullLenSwingInput)
+float slowHullSwing = hma(slowEma, hullLenSwingInput)
+
+float activeBlend = autoTfProfileInput ? (isIntradayTf ? blendIntraInput : (isDailyTf ? blendDailyInput : blendSwingInput)) : responseBlendInput
+float fastHull = autoTfProfileInput ? (isIntradayTf ? fastHullIntra : (isDailyTf ? fastHullDaily : fastHullSwing)) : fastHullManual
+float slowHull = autoTfProfileInput ? (isIntradayTf ? slowHullIntra : (isDailyTf ? slowHullDaily : slowHullSwing)) : slowHullManual
+
+float fastEdge = fastHull * (1.0 - activeBlend) + fastEma * activeBlend
+float slowEdge = slowHull * (1.0 - activeBlend) + slowEma * activeBlend
+float ribbonTop = math.max(fastEdge, slowEdge)
+float ribbonBottom = math.min(fastEdge, slowEdge)
+float ribbonMid = (fastEdge + slowEdge) * 0.5
+
+// Custom regime logic
+float spread = math.abs(fastEma - slowEma)
+float atrValue = ta.atr(14)
+float spreadAtr = atrValue > 0 ? spread / atrValue : 0.0
+bool compressed = spreadAtr < compressionAtrInput
+bool slopeUp = ribbonMid > ribbonMid[1]
+bool slopeDown = ribbonMid < ribbonMid[1]
+bool bullRegime = fastEma > slowEma and slopeUp and not compressed
+bool bearRegime = fastEma < slowEma and slopeDown and not compressed
+
+bool spreadExpanding = spread > spread[1]
+bool bullFlip = bullRegime and not bullRegime[1]
+bool bearFlip = bearRegime and not bearRegime[1]
+bool bullImpulse = bullRegime and spreadExpanding and close > ribbonTop and close[1] <= ribbonTop[1]
+bool bearImpulse = bearRegime and spreadExpanding and close < ribbonBottom and close[1] >= ribbonBottom[1]
+
+color bullPaletteColor = switch palettePresetInput
+    "Classic Red / Green" => #6C8F78
+    "Muted Teal / Terracotta" => #5F827A
+    "Olive Mist / Clay" => #7A9378
+    "Slate Blue / Warm Sand" => #6D8097
+    "Low-Contrast Mono" => #7E8A86
+    => #6F8F82
+
+color bearPaletteColor = switch palettePresetInput
+    "Classic Red / Green" => #F66F76
+    "Muted Teal / Terracotta" => #C98074
+    "Olive Mist / Clay" => #C78D7C
+    "Slate Blue / Warm Sand" => #B89273
+    "Low-Contrast Mono" => #A38E86
+    => #D18A8A
+
+color bullColor = useCustomColorsInput ? bullCustomInput : bullPaletteColor
+color bearColor = useCustomColorsInput ? bearCustomInput : bearPaletteColor
+
+bool emaBull = fastEma >= slowEma
+color ribbonColor = emaBull ? bullColor : bearColor
+
+plotTop = plot(ribbonTop, "Ribbon Top", color.new(ribbonColor, edgeTranspInput), edgeWidthInput)
+plotBottom = plot(ribbonBottom, "Ribbon Bottom", color.new(ribbonColor, edgeTranspInput), edgeWidthInput)
+fill(plotTop, plotBottom, color.new(ribbonColor, fillTranspInput), title="Ribbon Fill")
+
+plotshape(showSignalsInput and bullFlip, title="Bull Regime", style=shape.circle, location=location.belowbar, size=size.tiny, color=bullColor, text="R")
+plotshape(showSignalsInput and bearFlip, title="Bear Regime", style=shape.circle, location=location.abovebar, size=size.tiny, color=bearColor, text="R")
+plotshape(showSignalsInput and bullImpulse, title="Bull Impulse", style=shape.triangleup, location=location.belowbar, size=size.tiny, color=bullColor, text="I")
+plotshape(showSignalsInput and bearImpulse, title="Bear Impulse", style=shape.triangledown, location=location.abovebar, size=size.tiny, color=bearColor, text="I")
+
+barcolor(colorBarsInput ? color.new(ribbonColor, 0) : na)
+
+alertcondition(bullFlip, title="Bull Regime Started", message="Cold Ribbon: Bull regime started")
+alertcondition(bearFlip, title="Bear Regime Started", message="Cold Ribbon: Bear regime started")
+alertcondition(bullImpulse, title="Bull Impulse", message="Cold Ribbon: Bull impulse breakout")
+alertcondition(bearImpulse, title="Bear Impulse", message="Cold Ribbon: Bear impulse breakdown")
